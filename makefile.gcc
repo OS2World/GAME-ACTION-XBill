@@ -1,0 +1,51 @@
+# makefile.gcc -- GNU make + GCC + SDL2 build for xbill-2.1 (ArcaOS)
+# Usage:  make -f makefile.gcc
+#         make -f makefile.gcc clean
+
+CC      = gcc
+CFLAGS  = -O2 -Wall -Wno-unused-function \
+          -Wno-restrict -Wno-format-overflow -Wno-builtin-declaration-mismatch \
+          -Wno-implicit-function-declaration \
+          -Isrc \
+          -I/@unixroot/usr/include/SDL2 \
+          -DUSE_SDL2=1 -DSCREENSIZE=375 \
+          -DSCOREFILE=\"xbill.scores\" \
+          -D_BSD_SOURCE \
+          -D__OS2__
+LDFLAGS = -Zomf -Zhigh-mem -Zmap
+LIBS    = -lSDL2 -lSDL2_image
+
+BIN    = bin
+TARGET = $(BIN)/xbill.exe
+DEF    = src/xbill.def
+
+OBJS = \
+  $(BIN)/Bill.o \
+  $(BIN)/Bucket.o \
+  $(BIN)/Cable.o \
+  $(BIN)/Computer.o \
+  $(BIN)/Game.o \
+  $(BIN)/Horde.o \
+  $(BIN)/Network.o \
+  $(BIN)/OS.o \
+  $(BIN)/Scorelist.o \
+  $(BIN)/Spark.o \
+  $(BIN)/UI.o \
+  $(BIN)/sdl2.o \
+  $(BIN)/util.o
+
+.PHONY: all clean
+
+all: $(BIN) $(TARGET)
+
+$(BIN):
+	mkdir -p $(BIN)
+
+$(TARGET): $(OBJS) $(DEF)
+	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(LIBS) $(DEF)
+
+$(BIN)/%.o: src/%.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+clean:
+	rm -f $(BIN)/*.o $(BIN)/*.exe $(BIN)/*.map $(BIN)/*.sym

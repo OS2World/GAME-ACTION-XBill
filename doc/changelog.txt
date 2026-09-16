@@ -1,0 +1,364 @@
+xBill 2.1 - ArcaOS SDL2 Port - Changelog
+=========================================
+
+Port target: ArcaOS 5.x (OS/2)
+Toolchain:   GCC/EMX + OpenWatcom linker (wlink/wl.exe via EMXOMFLD)
+SDL version: SDL2 + SDL2_image
+
+
+--- Initial Port ---
+
+  * Created src/sdl2.c: full SDL2 UI backend implementing all UI_methods
+    function pointers (set_cursor, load_cursor, load_picture, set_icon,
+    picture_width, picture_height, graphics_init, clear_window,
+    refresh_window, draw_image, draw_line, draw_string, start_timer,
+    stop_timer, timer_active, popup_dialog, main_loop, initialize,
+    make_main_window, create_dialogs, set_pausebutton, update_dialog).
+
+  * Created src/sdl2.h: header declaring sdl2_setmethods().
+
+  * Created src/config.h: defines USE_SDL2=1; leaves USE_ATHENA,
+    USE_MOTIF, USE_GTK undefined to avoid spurious #ifdef matches in UI.c.
+
+  * Patched src/UI.c: added #if USE_SDL2 guard and sdl2 entry in guis[].
+
+  * Patched src/Game.c: added #ifndef SCREENSIZE guard so the -DSCREENSIZE
+    flag on the compiler command line overrides the in-source default.
+
+  * Created makefile.gcc: GNU make build file for GCC/EMX on ArcaOS.
+    Uses -Zomf -Zhigh-mem -Zmap, links via OpenWatcom linker.
+
+  * Created compile.cmd: OS/2 build script; sets EMXOMFLD_TYPE=WLINK,
+    EMXOMFLD_LINKER=wl.exe, EMXOMFLD_PRELINK=0; logs all output to
+    compile.cmd.log; checks for bin\xbill.exe to confirm success.
+
+  * Created src/xbill.def: OS/2 module definition (WINDOWAPI, STACKSIZE,
+    HEAPSIZE).
+
+
+--- Graphics and Image Loading ---
+
+  * All XPM pixmaps (sprites, logo, icon, OS icons, computer images, etc.)
+    are included as static C arrays via #include and loaded with
+    IMG_ReadXPMFromArray() from SDL2_image.
+
+  * All XBM cursor bitmaps (hand_up, hand_down, 10 OS cursors) are included
+    as static C arrays. XBM uses LSB-first bit order within each byte;
+    implemented pixel-by-pixel iteration rather than byte reversal to
+    correctly parse each bit position.
+
+  * Added palmcpu.xpm to both the #include list and xpm_table[] after it
+    was found missing at runtime.
+
+
+--- Cursor System ---
+
+  * Initial attempt used SDL_CreateColorCursor() from XBM data; abandoned
+    because SDL2's OS/2 PM backend does not render color cursors correctly.
+
+  * Switched to full software cursor rendering:
+    - SDL_ShowCursor(SDL_DISABLE) hides the SDL/PM cursor entirely.
+    - xbm_to_texture() converts XBM data (LSB-first) to an ARGB SDL_Texture
+      with per-pixel transparency.
+    - OS cursors (apple, bsd, hurd, linux, next, os2, palm, redhat, sgi,
+      sun) use XPM color data loaded via IMG_ReadXPMFromArray().
+    - sdl2_refresh_window() draws the cursor texture at the tracked mouse
+      position (gMouseX, gMouseY) at 2x scale, scaled consistently with
+      the game area.
+    - Mouse motion events update gMouseX/gMouseY and trigger a refresh
+      without touching the game render texture.
+
+
+--- Render-to-Texture Architecture ---
+
+  * Introduced gGameTex (SDL_TEXTUREACCESS_TARGET): game draws into this
+    texture; sdl2_refresh_window() composites it scaled 2x onto the screen
+    and then draws the software cursor and menu bar on top.
+
+  * This eliminates cursor ghost trails: moving the cursor does not modify
+    the game texture, so refreshes are always clean.
+
+  * set_game_vp() / clear_vp() helpers switch the render target between
+    the game texture and the screen.
+
+
+--- Menu System ---
+
+  * Replaced SDL_ShowMessageBox-based menus with custom SDL2-drawn dropdown
+    menus rendered directly via the SDL renderer.
+
+  * Menu bar (22 px tall) renders "Game" and "Info" labels at 2x font scale.
+
+  * Dropdown panels drawn on click with hover highlight (dark blue),
+    separator lines, and drop shadow. Panel width 280 px, item height 22 px,
+    item text at 2x font scale.
+
+  * Menu loop composites gGameTex on each frame so the game area is visible
+    behind the open dropdown (fixes garbage/gray background bug).
+
+  * Render target restored to gGameTex after menu closes via set_game_vp().
+
+
+--- Font Rendering ---
+
+  * Embedded CP437 8x8 bitmap font (font8x8[]) used for all text.
+
+  * blit_char() / blit_str(): render at 1x scale (game status bar).
+
+  * blit_char_s() / blit_str_s(): render at arbitrary pixel scale; used at
+    2x for menu bar labels and dropdown item text.
+
+
+--- Dialog System ---
+
+  * Blocking dialogs (New Game, Quit, Pause, High Scores, Story, Rules,
+    About, Enter Name, End Game) use SDL_ShowSimpleMessageBox or
+    SDL_ShowMessageBox (native PM dialogs).
+
+  * DIALOG_SCORE (between-level score) replaced with sdl2_score_popup():
+    a non-blocking overlay rendered by the SDL renderer that shows the
+    level score and auto-dismisses after 2 seconds. Clicking or pressing
+    any key also dismisses it early.
+
+
+--- Timer ---
+
+  * SDL_AddTimer one-shot callback pushes a registered user event
+    (gTimerEvent). Main loop handles it by calling Game_update() and
+    re-arming the timer, mirroring the X11 interval-timer behavior.
+
+  * Stale timer events are flushed before and after blocking dialogs to
+    prevent accumulated ticks from running the game while the dialog is open.
+
+
+--- Window and Scaling ---
+
+  * Game logical size: SCREENSIZE=375 (passed via -DSCREENSIZE=375).
+    Displayed at 2x scale: 750x750 game area on screen.
+
+  * Window size: 750 x 772 (game area width x game area height + menu bar).
+    No gray strip; window matches game area exactly.
+
+  * Window positioned at screen center using SDL_GetDisplayBounds() to
+    compute explicit coordinates (more reliable than SDL_WINDOWPOS_CENTERED
+    on the OS/2 PM SDL2 backend).
+
+
+--- Keyboard Shortcuts ---
+
+  * Ctrl+X: immediate quit (Game_quit(), no confirmation dialog).
+  * Escape: quit with confirmation dialog.
+  * N: new game.
+  * P: pause/resume.
+  * W: warp to level.
+  * H: view high scores.
+
+
+--- Error Handling ---
+
+  * sdl2_initialize() redirects stderr to xbill_err.log via freopen(),
+    capturing all fatal() messages. WINDOWAPI executables on OS/2 have no
+    visible console, so errors would otherwise be invisible.
+
+
+--- Compiler Warnings Fixed ---
+
+  * Added -Wno-unused-function, -Wno-restrict, -Wno-format-overflow,
+    -Wno-builtin-declaration-mismatch to CFLAGS for third-party source files.
+
+  * Added #include <strings.h> to src/Game.c (strncasecmp) and
+    src/UI.c (strcasecmp) to resolve implicit-declaration warnings.
+    Note: src/UI.c also includes the local "strings.h" (dialog text);
+    the system <strings.h> is a separate header with a different guard.
+
+  * Removed -DUSE_GTK=0 (and similar) from CFLAGS: UI.c uses #ifdef
+    (existence) guards, not #if (value) guards, so defining to 0 would
+    incorrectly enable the GTK code path without its headers. Unused
+    backends are left undefined entirely.
+
+
+XBill history:
+
+0.01 (7/21/94):  
+	- Bill moves, and he's in color too.  You can even click on
+		him and he excaims "OUCH!" or "SPLAT!"
+	- window resizing is very wrong
+	
+0.02 (7/22/94):	
+	- program no longer guaranteed to run predictably for 
+		longer than nine years (sorry)
+	- ridiculously improved code style (no really a lot!)
+	- added linked list unit and support for multiple monsters
+	- added support for computers
+	- bill says "POW!!!!!!" on button 2
+	- improved Makefile
+	- remembered to include app-defaults file in tar
+
+0.03 (7/24/94):
+	- forgot to initialize a variable.  either the stupid aix compiler 
+		initialized it anyway or we were really lucky testing it.
+	- removed annoying flicker
+	- has multiple computers on the screen with random OSes
+	- has multiple bills moving on the screen in random directions
+	- used sxpm to create smaller .xpm files, minor savings in memoy
+		and executable size, easier to edit pixmaps
+	- left button (button 1) removes bills from screen
+	- right button (button 3) now resets computers to wingdows.
+
+0.04 (7/25/94):
+	- got masking to work (well, maybe not...)
+	- bill now carries the wingdows box around
+	- event handling/speed improved
+
+0.1 (7/26/94):
+	- masking really works now
+	- fixed computer pixmap so it looks nice(r)
+	- randomized computer layout now leaves room for bill to stand on right
+	- support for bills walking in, standing at computers and walking out
+	- bills walk towards a specific computer to plunder (primitive ai)
+	- bill turns off computer, 'steals' native os and installs wingdows
+	- count of bills remaining is kept: decreased when bill enters screen
+					  - increased if bill leaves
+	- bill is killable in all states
+	- computer reset to native os on right button
+	- cleaned up code and internal structures
+	- event handling/speed really improved (optimized for the new code)
+	- server lag problems identified
+	- linked list unit fixed so that function to move between lists works
+	- window resizing is still very wrong
+	
+0.2 (8/14/94)
+	- programmers woke up after being asleep since 7/26.	
+	- code structures were fixed very much (again)
+	- bill faces in the direction he's walking
+	- bill explodes in a gory shower of blood when clicked on (yeah!)
+	- bill drops os when killed
+	- the os stays on the ground when bill is killed if it had been stolen
+	- the os bounces up and down while bill carries it
+	- changed default cursor (matias will have to draw a better one later)
+	- cursor changes during drag and drop operation
+	- drag and drop works!  there's a little hack involved, but not 
+		too bad...
+	- bill now smart enough to notice that a computer is already
+		corrupted and find a new one
+	- game ends if all computers are lost
+
+0.21 (8/15/94)
+	- attempt to port code to athena widgets.  it compiles and
+		runs w/o motif now (i hate C macros) a bit
+	- improved the makefile.  an imakefile one day maybe...
+
+0.22 (8/16/94)
+	- when bill leaves the field, he drops the os he's carrying
+	- status bar widget now does something
+
+0.3 (8/23/94)
+	- improved responsiveness a lot :)
+	- menubar does something (new game, pause and quit buttons) if 
+		motif is used.
+	- levels now exist (barely)
+	- yet more code cleanup
+
+0.31 (8/24/94)
+	- a few things depend on the level (freq. and number of appearing
+		bills, number of computers, step size)
+	- bug where a computer is ignored if off is removed
+	- menu code written.
+	- athena code started.  this works more or less, but not too well.
+		i'd recommend using motif and/or a statically linked binary.
+
+0.32 (9/18/94)
+	- about box works.  help almost works also.
+	- a bunch of bugs fixed
+	- have an Imakefile now (thanks to Greg Seidman - anthro@cs.umd.edu)
+
+0.9 (11/28/94 - a bit busier during school)
+	- warp to arbitrary level works
+	- game pauses when cursor leaves window
+	- cursor warps to near upper left corner of opened dialog boxes
+	- redefined both reset and drag to right button (button 3),
+		added -1 option for people with a one button mouse.
+		-1 may slow the game down a bit. 
+	- added -l, -L to specify starting level
+	- added -v for version info
+	- improved pictures a lot
+	- added confirmations for actions
+	- game now pauses well
+	- fixed level difficulty stuff
+	- bill walks at two speeds
+	- minimizes to an icon (a cool one too...)
+	- scoring improved
+	- window cannot be resized now, no matter how hard you try :)
+	- much cooler animations for bill replacing os
+	- added high score list
+	- fixed lots of silly bugs
+	- made program not die from colormap error (i hope)
+
+1.0 (4/5/95-4/9/95)
+	- remembered that the game's not done yet :)
+	- replaced usleep() calls with XtAppAddTimeout().  should make
+		the game more responsive
+	- changed all popup windows to modal dialogs.  cleans up code
+		a lot
+	- removed Athena support, since it would take too long to finish.
+	- made a couple pixmaps a bit smaller
+	- changed colors to gray.  why not?
+	- finally got everything to work with full colormaps
+	- got rid of app-defaults file.  Not really used anyway
+	- Only uses one button now (any button).  Easier to play.
+	- Some Imakefile fixes
+
+1.1 (4/16/95)
+	- modularized widget code, and added Athena widget support (rewritten
+		from scratch).  The game looks better with Motif, but that's
+		not too important.
+	- made pause button only active during game play
+	- warping to a level starts a game if one isn't being played
+	- fixed a potentially nasty bug that could cause bills to get lost
+	- works in TrueColor now (I think - it works in 16 bit mode at least)
+
+1.1a (9/22/95)
+	- fixed bug where getopt() returned a char instead of an int.
+	- fixed bug where hitting Enter when entering a high score
+		corrupted the high score file.
+	- don't fclose() nonexistant files any more.
+	- added BSD as another operating system (patches by Joerg Wunsch,
+		joerg_wunsch@uriah.heep.sax.de)
+	- it was really easy to play forever by guarding one computer.  Now
+		you lose when there's only one computer left running its
+		normal OS.
+	- added man page, written by Pekka Marjola (marjola@trshp.ntc.nokia.com)
+
+2.0 (1/23/1997)
+	- changed around some timer code.
+	- removed Athena DrawingArea widget since CoreWidget works too.
+	- massive code reorganization to improve portability to other
+		GUIs, languages, etc.
+	- Some computers are connected by network cables
+	- When a computer with a network cable becomes infected, it will
+		release a spark down the cable which will infect the
+		computer on the other end.  Pouring the bucket of water
+		on the spark will extinguish it.
+	- Made cursors and various other images look better.
+	- Removed references to defenestration.dorm.umd.edu, which no
+		longer exists.
+	- Added Red Hat logo (fixed broken Red Hat patch).
+	- Added GNU Hurd logo
+	- Added Linux penguin logo
+	- The BSD, Red Hat, Linux, OS/2, and Hurd operating systems are
+		interchangable on the 2 PC computers.
+	- The score is now displayed in the playing field.
+	- Made Athena version far better looking.
+	- Motif version almost completely works with Lesstif.
+
+2.1 (11/15/2001)
+	- converted all code from C++ into C.
+	- cleaned up pretty much all of the code.
+	- modified build system to use GNU autoconf instead of imake.
+	- made the UI system modular, and created modules for the Athena
+	  and Motif widget sets.  By default, both are built into the
+	  binary.
+	- added a GTK front end.
+	- added an option to use a larger playing field.
+	- changed the Athena front end to use Xaw3d when possible.
+	- add Palm OS/CPU (images borrowed from pBill and heavily modified)
