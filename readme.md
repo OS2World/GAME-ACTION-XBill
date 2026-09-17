@@ -85,9 +85,9 @@ productive.
 | Key | Action |
 |---|---|
 | Ctrl+X | Quit immediately |
+| Ctrl+P | Pause / resume (toggles PAUSED overlay) |
 | Escape | Quit (with confirmation) |
 | N | New game |
-| P | Pause / resume |
 | W | Warp to level |
 | H | View high scores |
 
@@ -100,7 +100,7 @@ productive.
 | Game | New Game | Start a new game from level 1 |
 | Game | Warp to level... | Jump to a specific level |
 | Game | View High Scores | Show the high score table |
-| Game | Pause | Pause the current game |
+| Game | Pause | Toggle pause (same as Ctrl+P) |
 | Game | Quit Game | Quit with confirmation |
 | Info | Story | Read the story |
 | Info | Rules | Read the rules |
@@ -110,10 +110,13 @@ productive.
 
 ## Technical Notes
 
-- Window size: 750 × 772 pixels (750 × 750 game area + 22 px menu bar)
+- Window size: 750 × 772 pixels (750 × 750 game area + 22 px menu bar), centered on screen
 - Game logic runs at the original 400 × 400 resolution, displayed at 2× scale
 - All XPM and XBM graphics are embedded in the executable (no external image files needed)
 - The SDL2 cursor API is not used on OS/2; the cursor is rendered in software
+- Application icon embedded via OS/2 resource compiler (`src/xbill.rc` + `src/xbill.ico`)
+- When paused, a semi-transparent PAUSED overlay is drawn over the game area
+- Pausing via Ctrl+P or the Game menu does not interfere with the window-focus pause
 
 ---
 

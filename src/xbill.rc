@@ -1,0 +1,11 @@
+/* xbill.rc -- OS/2 resource script for xBill 2.1 SDL2 port
+ *
+ * Resource ID 1 is the standard application icon ID recognised by the
+ * Workplace Shell when it creates a program object for the EXE.
+ *
+ * Build (run from the project root directory):
+ *   rc -r -p -x2 src/xbill.rc bin/xbill.res
+ *   rc bin/xbill.res bin/xbill.exe
+ */
+
+ICON 1 "src/xbill.ico"

@@ -537,6 +537,10 @@ static void sdl2_start_timer(int ms)
     if (!gTimerActive) {
         gTimerActive = 1;
         gTimer = SDL_AddTimer((Uint32)ms, timer_cb, NULL);
+        if (!gTimer) {
+            gTimerActive = 0;
+            fatal("SDL_AddTimer failed: %s", SDL_GetError());
+        }
     }
 }
 
@@ -618,6 +622,11 @@ static void sdl2_load_picture(const char *name, int trans, Picture **pictp)
         SDL_Surface *bg = SDL_CreateRGBSurface(0, surf->w, surf->h, 32,
                                                0xFF000000, 0x00FF0000,
                                                0x0000FF00, 0x000000FF);
+        if (!bg) {
+            SDL_FreeSurface(surf);
+            fatal("sdl2_load_picture: SDL_CreateRGBSurface failed for '%s': %s",
+                  name, SDL_GetError());
+        }
         SDL_FillRect(bg, NULL, SDL_MapRGB(bg->format, 255, 255, 255));
         SDL_BlitSurface(surf, NULL, bg, NULL);
         SDL_FreeSurface(surf);
@@ -802,28 +811,32 @@ static void sdl2_draw_string(const char *str, int x, int y)
 
 static void draw_input_box(const char *prompt, const char *buf)
 {
-    int W = gScreensize;
-    int bw = (W * 3) / 4, bh = 54;
-    int bx = (W - bw) / 2, by = (gScreensize - bh) / 2;
+    /* Draw directly on screen (not into gGameTex) so it is visible */
+    clear_vp();
+    SDL_SetRenderDrawColor(gRen, 180, 180, 180, 255);
+    SDL_RenderClear(gRen);
 
-    set_game_vp();
+    /* Composite game area */
+    SDL_Rect gameDst = {0, MENU_H, gDispSize, gDispSize};
+    SDL_RenderCopy(gRen, gGameTex, NULL, &gameDst);
+
     /* Dark overlay over game area */
     SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(gRen, 0, 0, 0, 160);
-    SDL_Rect overlay = {0, 0, W, gScreensize};
-    SDL_RenderFillRect(gRen, &overlay);
+    SDL_RenderFillRect(gRen, &gameDst);
     SDL_SetRenderDrawBlendMode(gRen, SDL_BLENDMODE_NONE);
 
-    /* Box background */
-    SDL_SetRenderDrawColor(gRen, 40, 40, 80, 255);
+    /* Box in screen coordinates */
+    int bw = (gDispSize * 3) / 4, bh = 54;
+    int bx = (gDispSize - bw) / 2;
+    int by = gDispSize / 2 - bh / 2 + MENU_H;
     SDL_Rect box = {bx, by, bw, bh};
-    SDL_RenderFillRect(gRen, &box);
 
-    /* Box border */
+    SDL_SetRenderDrawColor(gRen, 40, 40, 80, 255);
+    SDL_RenderFillRect(gRen, &box);
     SDL_SetRenderDrawColor(gRen, 200, 200, 255, 255);
     SDL_RenderDrawRect(gRen, &box);
 
-    /* Prompt and input */
     blit_str(bx + 8, by + 8, prompt, 255, 255, 200);
     char display[256];
     snprintf(display, sizeof(display), "> %s_", buf);
@@ -831,7 +844,7 @@ static void draw_input_box(const char *prompt, const char *buf)
 
     draw_menu_bar();
     SDL_RenderPresent(gRen);
-    set_game_vp();
+    SDL_SetRenderTarget(gRen, gGameTex);
 }
 
 static int sdl2_get_text(const char *prompt, char *buf, int maxlen)
@@ -944,7 +957,7 @@ static void sdl2_score_popup(const char *msg)
         snprintf(cstr, sizeof(cstr), "Next level in %ds...", secs);
         blit_str(bx + 8, by + 52, cstr, 180, 180, 180);
 
-        if (gCursorTex) {
+        if (gCursorTex && gMouseY >= MENU_H && gMouseX < gDispSize) {
             int scale = gDispSize / gScreensize;
             SDL_Rect cdst = {gMouseX - gCursorHotX * scale,
                              gMouseY - gCursorHotY * scale,
@@ -1044,12 +1057,14 @@ static void sdl2_popup_dialog(int index)
 
     SDL_FlushEvent(gTimerEvent);
 
-    /* DIALOG_SCORE runs its own 2-second event loop which consumes the
-       game timer event before the main loop can see it.  gTimerActive is
-       still 1 but the underlying SDL_AddTimer already fired (one-shot) and
-       will never push another event, so the game loop would freeze.
-       Inject a synthetic timer event so the main loop re-arms normally. */
-    if (index == DIALOG_SCORE) {
+    /* DIALOG_SCORE, DIALOG_WARPLEVEL, and DIALOG_ENTERNAME each run their
+       own event loops that consume the one-shot game timer event before the
+       main loop can see it.  gTimerActive stays 1 but the SDL_AddTimer
+       already fired and will never push another event — freeze without this.
+       Inject a synthetic event so the main loop re-arms normally. */
+    if (index == DIALOG_SCORE ||
+        index == DIALOG_WARPLEVEL ||
+        index == DIALOG_ENTERNAME) {
         gTimerActive = 0;
         SDL_Event te;
         SDL_memset(&te, 0, sizeof(te));
@@ -1198,7 +1213,7 @@ static void sdl2_main_loop(void)
                 UI_pause_game();
                 break;
             case SDL_WINDOWEVENT_ENTER:
-                UI_resume_game();
+                if (!gPaused) UI_resume_game();
                 break;
             case SDL_WINDOWEVENT_EXPOSED:
                 UI_refresh();

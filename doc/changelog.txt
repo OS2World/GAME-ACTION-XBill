@@ -147,11 +147,12 @@ SDL version: SDL2 + SDL2_image
 --- Keyboard Shortcuts ---
 
   * Ctrl+X: immediate quit (Game_quit(), no confirmation dialog).
+  * Ctrl+P: pause/resume toggle (replaces bare P key; see Pause System below).
   * Escape: quit with confirmation dialog.
   * N: new game.
-  * P: pause/resume.
   * W: warp to level.
   * H: view high scores.
+  * Bare P key removed to avoid conflicts.
 
 
 --- Error Handling ---
@@ -171,10 +172,104 @@ SDL version: SDL2 + SDL2_image
     Note: src/UI.c also includes the local "strings.h" (dialog text);
     the system <strings.h> is a separate header with a different guard.
 
+  * Added -Wno-implicit-function-declaration to CFLAGS: on this ArcaOS
+    GCC/EMX build, <strings.h> does not expose strncasecmp/strcasecmp
+    prototypes at all; the flag suppresses the residual implicit-declaration
+    warning without changing runtime behaviour (the libc symbols are present).
+
   * Removed -DUSE_GTK=0 (and similar) from CFLAGS: UI.c uses #ifdef
     (existence) guards, not #if (value) guards, so defining to 0 would
     incorrectly enable the GTK code path without its headers. Unused
     backends are left undefined entirely.
+
+
+--- Pause System Overhaul ---
+
+  * Introduced gPaused flag (int) tracking whether the user has explicitly
+    paused the game, separate from the window-focus auto-pause.
+
+  * toggle_pause(): single function that calls UI_pause_game()/UI_resume_game()
+    and sets/clears gPaused, then redraws. A static forward declaration was
+    added before sdl2_popup_dialog() to resolve a GCC implicit-declaration
+    error that arose because the earlier DIALOG_PAUSEGAME handler referenced
+    the function before its definition.
+
+  * DIALOG_PAUSEGAME now calls toggle_pause() instead of opening a native
+    PM message-box dialog. This makes "Pause" in the Game menu a true toggle
+    that matches Ctrl+P.
+
+  * sdl2_set_pausebutton(): clears gPaused when pause is disabled (e.g.,
+    between levels) so a stale gPaused=1 cannot survive a level transition.
+
+  * PAUSED overlay: when gPaused is set, sdl2_refresh_window() draws a
+    semi-transparent black rectangle over the game area and renders the text
+    "PAUSED" centred in yellow at 3x font scale.
+
+  * SDL_WINDOWEVENT_ENTER guard: the auto-resume on mouse re-entry is now
+    conditional on !gPaused so that a user-initiated pause is not silently
+    cancelled by moving the mouse outside and back into the window.
+
+
+--- Timer / Level-Advance Fixes ---
+
+  * Root cause: SDL_AddTimer is one-shot. sdl2_score_popup() and
+    sdl2_get_text() each run their own blocking event loop that consumes
+    the single pending timer event; when they return, the main loop's
+    gTimerActive flag was still 1 (believing a timer was armed) but no
+    timer was running, so the game loop stalled permanently.
+
+  * Fix: after sdl2_popup_dialog() flushes events for DIALOG_SCORE,
+    DIALOG_WARPLEVEL, and DIALOG_ENTERNAME, it resets gTimerActive=0 and
+    pushes a synthetic gTimerEvent back onto the SDL event queue. The main
+    loop receives it, calls Game_update(), and re-arms the timer normally.
+
+  * This restores automatic level advance after the score popup without
+    any change to Game.c or UI.c timer logic.
+
+
+--- draw_input_box Fix (Text Input Dialogs) ---
+
+  * Original draw_input_box() called set_game_vp() at entry, directing all
+    rendering into gGameTex. The prompt overlay was painted into the game
+    texture but never composited to the screen, so the text input dialog
+    was invisible (only the menu bar was shown).
+
+  * Fixed by rewriting draw_input_box() to use clear_vp() (screen target),
+    composite gGameTex to the screen, draw a dark overlay, then render the
+    input box and prompt text directly on screen — matching the pattern used
+    by sdl2_score_popup() and the dropdown menu loop. Render target is
+    restored to gGameTex on exit.
+
+
+--- Bug Fixes (Code Review) ---
+
+  * SDL_AddTimer return value unchecked: on failure the timer ID is NULL
+    but gTimerActive was left at 1, causing the game loop to stall waiting
+    for an event that would never arrive. Fixed: check return value; on
+    failure reset gTimerActive=0 and call fatal().
+
+  * SDL_CreateRGBSurface NULL not checked in sdl2_load_picture(): on OOM
+    the original surface was leaked and the NULL pointer was passed to
+    SDL_FillRect, causing a crash. Fixed: check for NULL, free original
+    surface, call fatal().
+
+  * Score popup cursor bounds unchecked: sdl2_score_popup() drew the
+    software cursor at gMouseX/gMouseY without checking whether the cursor
+    was inside the game area, allowing it to overdraw the menu bar. Fixed:
+    guard with gMouseY >= MENU_H && gMouseX < gDispSize before drawing.
+
+
+--- Application Icon ---
+
+  * Created src/xbill.rc: OS/2 resource script that embeds src/xbill.ico
+    as resource ID 1 (the standard Workplace Shell application icon ID).
+
+  * Updated makefile.gcc:
+    - Added RES = $(BIN)/xbill.res, RC_SRC = src/xbill.rc, ICO = src/xbill.ico.
+    - Added build rule: wrc -r -p -x2 $(RC_SRC) $@ to compile .rc to .res.
+    - Added $(RES) as a dependency of $(TARGET); after linking, wrc $(RES) $@
+      stamps the resource into the EXE so the Workplace Shell displays the icon.
+    - Updated clean rule to remove *.res.
 
 
 XBill history:

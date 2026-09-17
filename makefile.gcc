@@ -18,6 +18,9 @@ LIBS    = -lSDL2 -lSDL2_image
 BIN    = bin
 TARGET = $(BIN)/xbill.exe
 DEF    = src/xbill.def
+RES    = $(BIN)/xbill.res
+RC_SRC = src/xbill.rc
+ICO    = src/xbill.ico
 
 OBJS = \
   $(BIN)/Bill.o \
@@ -41,11 +44,15 @@ all: $(BIN) $(TARGET)
 $(BIN):
 	mkdir -p $(BIN)
 
-$(TARGET): $(OBJS) $(DEF)
+$(RES): $(RC_SRC) $(ICO) | $(BIN)
+	wrc -r -p -x2 $(RC_SRC) $@
+
+$(TARGET): $(OBJS) $(DEF) $(RES)
 	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(LIBS) $(DEF)
+	wrc $(RES) $@
 
 $(BIN)/%.o: src/%.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -f $(BIN)/*.o $(BIN)/*.exe $(BIN)/*.map $(BIN)/*.sym
+	rm -f $(BIN)/*.o $(BIN)/*.exe $(BIN)/*.res $(BIN)/*.map $(BIN)/*.sym
