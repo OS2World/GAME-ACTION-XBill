@@ -6,6 +6,8 @@ computers against an evil hacker named Bill who tries to infect them with
 
 This is the SDL2 port of xBill 2.1 for ArcaOS (OS/2).
 
+![XBill Screenshot](doc/XBill.png)
+
 ---
 
 ## Requirements
